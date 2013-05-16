@@ -888,3 +888,18 @@ def pprint(value):
         return pformat(value)
     except Exception as e:
         return "Error in formatting: %s" % force_text(e, errors="replace")
+
+###################
+# MATH            #
+###################
+
+@register.filter("map")
+def map_filter(value, src_min, src_max, dst_min, dst_max):
+    """map the value from [src_min,src_max] range to [dst_min, dst_max]
+    range.
+
+    Modeled after the corresponding map() function available (for
+    example) in Processing http://processing.org/reference/map_.html
+    """
+    return dst_min + value * ( dst_max - dst_min) / ( src_max - src_min)
+

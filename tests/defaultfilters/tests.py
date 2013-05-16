@@ -656,3 +656,8 @@ class DefaultFiltersTests(TestCase):
         self.assertEqual(removetags(123, 'a'), '123')
         self.assertEqual(striptags(123), '123')
 
+    def test_map_filter(self):
+        self.assertAlmostEqual(map_filter(0, 0, 100, 0, 1000), 0)
+        self.assertAlmostEqual(map_filter(0, 0, 100, 1000, 0), 1000)
+        self.assertAlmostEqual(map_filter(0, 100, 0, 0, 1000), 1000)
+        self.assertAlmostEqual(map_filter(10, 0, 100, 0, 1000), 100)
