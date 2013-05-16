@@ -3,8 +3,10 @@ from __future__ import absolute_import, unicode_literals
 import datetime
 import os
 from decimal import Decimal
+import warnings
 
 from django import forms
+from django.core.exceptions import FieldError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.validators import ValidationError
 from django.db import connection
@@ -29,19 +31,25 @@ if test_images:
     class ImageFileForm(forms.ModelForm):
         class Meta:
             model = ImageFile
+            fields = '__all__'
+
 
     class OptionalImageFileForm(forms.ModelForm):
         class Meta:
             model = OptionalImageFile
+            fields = '__all__'
+
 
 class ProductForm(forms.ModelForm):
     class Meta:
         model = Product
+        fields = '__all__'
 
 
 class PriceForm(forms.ModelForm):
     class Meta:
         model = Price
+        fields = '__all__'
 
 
 class BookForm(forms.ModelForm):
@@ -65,11 +73,13 @@ class ExplicitPKForm(forms.ModelForm):
 class PostForm(forms.ModelForm):
     class Meta:
         model = Post
+        fields = '__all__'
 
 
 class DerivedPostForm(forms.ModelForm):
     class Meta:
         model = DerivedPost
+        fields = '__all__'
 
 
 class CustomAuthorForm(forms.ModelForm):
@@ -77,60 +87,78 @@ class CustomAuthorForm(forms.ModelForm):
 
    class Meta:
        model = Author
+       fields = '__all__'
 
 
 class FlexDatePostForm(forms.ModelForm):
     class Meta:
         model = FlexibleDatePost
+        fields = '__all__'
 
 
 class BaseCategoryForm(forms.ModelForm):
     class Meta:
         model = Category
+        fields = '__all__'
 
 
 class ArticleForm(forms.ModelForm):
     class Meta:
         model = Article
+        fields = '__all__'
 
 
 class ArticleForm(forms.ModelForm):
     class Meta:
         model = Article
+        fields = '__all__'
+
 
 class PartialArticleForm(forms.ModelForm):
     class Meta:
         model = Article
         fields = ('headline','pub_date')
 
+
 class RoykoForm(forms.ModelForm):
     class Meta:
         model = Author
+        fields = '__all__'
+
 
 class TestArticleForm(forms.ModelForm):
     class Meta:
         model = Article
+        fields = '__all__'
+
 
 class PartialArticleFormWithSlug(forms.ModelForm):
     class Meta:
         model = Article
-        fields=('headline', 'slug', 'pub_date')
+        fields = ('headline', 'slug', 'pub_date')
+
 
 class ArticleStatusForm(forms.ModelForm):
     class Meta:
         model = ArticleStatus
+        fields = '__all__'
+
 
 class InventoryForm(forms.ModelForm):
     class Meta:
         model = Inventory
+        fields = '__all__'
+
 
 class SelectInventoryForm(forms.Form):
     items = forms.ModelMultipleChoiceField(Inventory.objects.all(), to_field_name='barcode')
+
 
 class CustomFieldForExclusionForm(forms.ModelForm):
     class Meta:
         model = CustomFieldForExclusionModel
         fields = ['name', 'markup']
+
 
 class ShortCategory(forms.ModelForm):
     name = forms.CharField(max_length=5)
@@ -139,30 +167,44 @@ class ShortCategory(forms.ModelForm):
 
     class Meta:
         model = Category
+        fields = '__all__'
+
 
 class ImprovedArticleForm(forms.ModelForm):
     class Meta:
         model = ImprovedArticle
+        fields = '__all__'
+
 
 class ImprovedArticleWithParentLinkForm(forms.ModelForm):
     class Meta:
         model = ImprovedArticleWithParentLink
+        fields = '__all__'
+
 
 class BetterAuthorForm(forms.ModelForm):
     class Meta:
         model = BetterAuthor
+        fields = '__all__'
+
 
 class AuthorProfileForm(forms.ModelForm):
     class Meta:
         model = AuthorProfile
+        fields = '__all__'
+
 
 class TextFileForm(forms.ModelForm):
     class Meta:
         model = TextFile
+        fields = '__all__'
+
 
 class BigIntForm(forms.ModelForm):
     class Meta:
         model = BigInt
+        fields = '__all__'
+
 
 class ModelFormWithMedia(forms.ModelForm):
     class Media:
@@ -172,24 +214,49 @@ class ModelFormWithMedia(forms.ModelForm):
         }
     class Meta:
         model = TextFile
+        fields = '__all__'
+
 
 class CommaSeparatedIntegerForm(forms.ModelForm):
-   class Meta:
-       model = CommaSeparatedInteger
+    class Meta:
+        model = CommaSeparatedInteger
+        fields = '__all__'
+
 
 class PriceFormWithoutQuantity(forms.ModelForm):
     class Meta:
         model = Price
         exclude = ('quantity',)
 
+
 class ColourfulItemForm(forms.ModelForm):
     class Meta:
         model = ColourfulItem
+        fields = '__all__'
 
 
 class ModelFormBaseTest(TestCase):
     def test_base_form(self):
         self.assertEqual(list(BaseCategoryForm.base_fields),
+                         ['name', 'slug', 'url'])
+
+    def test_missing_fields_attribute(self):
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always", PendingDeprecationWarning)
+
+            class MissingFieldsForm(forms.ModelForm):
+                class Meta:
+                    model = Category
+
+        # There is some internal state in warnings module which means that
+        # if a warning has been seen already, the catch_warnings won't
+        # have recorded it. The following line therefore will not work reliably:
+
+        # self.assertEqual(w[0].category, PendingDeprecationWarning)
+
+        # Until end of the deprecation cycle, should still create the
+        # form as before:
+        self.assertEqual(list(MissingFieldsForm.base_fields),
                          ['name', 'slug', 'url'])
 
     def test_extra_fields(self):
@@ -205,6 +272,33 @@ class ModelFormBaseTest(TestCase):
 
             class Meta:
                 model = Category
+                fields = '__all__'
+
+        self.assertTrue(isinstance(ReplaceField.base_fields['url'],
+                                     forms.fields.BooleanField))
+
+    def test_replace_field_variant_2(self):
+        # Should have the same result as before,
+        # but 'fields' attribute specified differently
+        class ReplaceField(forms.ModelForm):
+            url = forms.BooleanField()
+
+            class Meta:
+                model = Category
+                fields = ['url']
+
+        self.assertTrue(isinstance(ReplaceField.base_fields['url'],
+                                     forms.fields.BooleanField))
+
+    def test_replace_field_variant_3(self):
+        # Should have the same result as before,
+        # but 'fields' attribute specified differently
+        class ReplaceField(forms.ModelForm):
+            url = forms.BooleanField()
+
+            class Meta:
+                model = Category
+                fields = [] # url will still appear, since it is explicit above
 
         self.assertTrue(isinstance(ReplaceField.base_fields['url'],
                                      forms.fields.BooleanField))
@@ -215,18 +309,26 @@ class ModelFormBaseTest(TestCase):
 
             class Meta:
                 model = Author
+                fields = '__all__'
 
         wf = AuthorForm({'name': 'Richard Lockridge'})
         self.assertTrue(wf.is_valid())
 
-    def test_limit_fields(self):
-        class LimitFields(forms.ModelForm):
-            class Meta:
-                model = Category
-                fields = ['url']
+    def test_limit_nonexistent_field(self):
+        expected_msg = 'Unknown field(s) (nonexistent) specified for Category'
+        with self.assertRaisesMessage(FieldError, expected_msg):
+            class InvalidCategoryForm(forms.ModelForm):
+                class Meta:
+                    model = Category
+                    fields = ['nonexistent']
 
-        self.assertEqual(list(LimitFields.base_fields),
-                         ['url'])
+    def test_limit_fields_with_string(self):
+        expected_msg = "CategoryForm.Meta.fields cannot be a string. Did you mean to type: ('url',)?"
+        with self.assertRaisesMessage(TypeError, expected_msg):
+            class CategoryForm(forms.ModelForm):
+                class Meta:
+                    model = Category
+                    fields = ('url') # note the missing comma
 
     def test_exclude_fields(self):
         class ExcludeFields(forms.ModelForm):
@@ -236,6 +338,23 @@ class ModelFormBaseTest(TestCase):
 
         self.assertEqual(list(ExcludeFields.base_fields),
                          ['name', 'slug'])
+
+    def test_exclude_nonexistent_field(self):
+        class ExcludeFields(forms.ModelForm):
+            class Meta:
+                model = Category
+                exclude = ['nonexistent']
+
+        self.assertEqual(list(ExcludeFields.base_fields),
+                         ['name', 'slug', 'url'])
+
+    def test_exclude_fields_with_string(self):
+        expected_msg = "CategoryForm.Meta.exclude cannot be a string. Did you mean to type: ('url',)?"
+        with self.assertRaisesMessage(TypeError, expected_msg):
+            class CategoryForm(forms.ModelForm):
+                class Meta:
+                    model = Category
+                    exclude = ('url') # note the missing comma
 
     def test_confused_form(self):
         class ConfusedForm(forms.ModelForm):
@@ -260,6 +379,7 @@ class ModelFormBaseTest(TestCase):
             """
             class Meta:
                 model = Article
+                fields = '__all__'
             # MixModelForm is now an Article-related thing, because MixModelForm.Meta
             # overrides BaseCategoryForm.Meta.
 
@@ -314,6 +434,7 @@ class ModelFormBaseTest(TestCase):
 
              class Meta:
                  model = Category
+                 fields = '__all__'
 
         class SubclassMeta(SomeCategoryForm):
             """ We can also subclass the Meta inner class to change the fields

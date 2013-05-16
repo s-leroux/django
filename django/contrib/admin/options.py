@@ -5,7 +5,7 @@ from django import forms
 from django.conf import settings
 from django.forms.formsets import all_valid, DELETION_FIELD_NAME
 from django.forms.models import (modelform_factory, modelformset_factory,
-    inlineformset_factory, BaseInlineFormSet)
+    inlineformset_factory, BaseInlineFormSet, modelform_defines_fields)
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.admin import widgets, helpers
 from django.contrib.admin.util import (unquote, flatten_fieldsets, get_deleted_objects,
@@ -13,7 +13,7 @@ from django.contrib.admin.util import (unquote, flatten_fieldsets, get_deleted_o
 from django.contrib.admin.templatetags.admin_static import static
 from django.contrib import messages
 from django.views.decorators.csrf import csrf_protect
-from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError, FieldError
 from django.core.paginator import Paginator
 from django.core.urlresolvers import reverse
 from django.db import models, transaction, router
@@ -488,7 +488,15 @@ class ModelAdmin(BaseModelAdmin):
             "formfield_callback": partial(self.formfield_for_dbfield, request=request),
         }
         defaults.update(kwargs)
-        return modelform_factory(self.model, **defaults)
+
+        if defaults['fields'] is None and not modelform_defines_fields(defaults['form']):
+            defaults['fields'] = forms.ALL_FIELDS
+
+        try:
+            return modelform_factory(self.model, **defaults)
+        except FieldError as e:
+            raise FieldError('%s. Check fields/fieldsets/exclude attributes of class %s.'
+                             % (e, self.__class__.__name__))
 
     def get_changelist(self, request, **kwargs):
         """
@@ -519,6 +527,10 @@ class ModelAdmin(BaseModelAdmin):
             "formfield_callback": partial(self.formfield_for_dbfield, request=request),
         }
         defaults.update(kwargs)
+        if (defaults.get('fields') is None
+            and not modelform_defines_fields(defaults.get('form'))):
+            defaults['fields'] = forms.ALL_FIELDS
+
         return modelform_factory(self.model, **defaults)
 
     def get_changelist_formset(self, request, **kwargs):
@@ -829,7 +841,7 @@ class ModelAdmin(BaseModelAdmin):
         # the presence of keys in request.POST.
         if "_continue" in request.POST:
             msg = _('The %(name)s "%(obj)s" was added successfully. You may edit it again below.') % msg_dict
-            self.message_user(request, msg)
+            self.message_user(request, msg, messages.SUCCESS)
             if post_url_continue is None:
                 post_url_continue = reverse('admin:%s_%s_change' %
                                             (opts.app_label, opts.model_name),
@@ -847,11 +859,11 @@ class ModelAdmin(BaseModelAdmin):
                 (escape(pk_value), escapejs(obj)))
         elif "_addanother" in request.POST:
             msg = _('The %(name)s "%(obj)s" was added successfully. You may add another %(name)s below.') % msg_dict
-            self.message_user(request, msg)
+            self.message_user(request, msg, messages.SUCCESS)
             return HttpResponseRedirect(request.path)
         else:
             msg = _('The %(name)s "%(obj)s" was added successfully.') % msg_dict
-            self.message_user(request, msg)
+            self.message_user(request, msg, messages.SUCCESS)
             return self.response_post_save_add(request, obj)
 
     def response_change(self, request, obj):
@@ -865,27 +877,27 @@ class ModelAdmin(BaseModelAdmin):
         msg_dict = {'name': force_text(opts.verbose_name), 'obj': force_text(obj)}
         if "_continue" in request.POST:
             msg = _('The %(name)s "%(obj)s" was changed successfully. You may edit it again below.') % msg_dict
-            self.message_user(request, msg)
+            self.message_user(request, msg, messages.SUCCESS)
             if "_popup" in request.REQUEST:
                 return HttpResponseRedirect(request.path + "?_popup=1")
             else:
                 return HttpResponseRedirect(request.path)
         elif "_saveasnew" in request.POST:
             msg = _('The %(name)s "%(obj)s" was added successfully. You may edit it again below.') % msg_dict
-            self.message_user(request, msg)
+            self.message_user(request, msg, messages.SUCCESS)
             return HttpResponseRedirect(reverse('admin:%s_%s_change' %
                                         (opts.app_label, opts.model_name),
                                         args=(pk_value,),
                                         current_app=self.admin_site.name))
         elif "_addanother" in request.POST:
             msg = _('The %(name)s "%(obj)s" was changed successfully. You may add another %(name)s below.') % msg_dict
-            self.message_user(request, msg)
+            self.message_user(request, msg, messages.SUCCESS)
             return HttpResponseRedirect(reverse('admin:%s_%s_add' %
                                         (opts.app_label, opts.model_name),
                                         current_app=self.admin_site.name))
         else:
             msg = _('The %(name)s "%(obj)s" was changed successfully.') % msg_dict
-            self.message_user(request, msg)
+            self.message_user(request, msg, messages.SUCCESS)
             return self.response_post_save_change(request, obj)
 
     def response_post_save_add(self, request, obj):
@@ -964,7 +976,7 @@ class ModelAdmin(BaseModelAdmin):
                 # Reminder that something needs to be selected or nothing will happen
                 msg = _("Items must be selected in order to perform "
                         "actions on them. No items have been changed.")
-                self.message_user(request, msg)
+                self.message_user(request, msg, messages.WARNING)
                 return None
 
             if not select_across:
@@ -982,7 +994,7 @@ class ModelAdmin(BaseModelAdmin):
                 return HttpResponseRedirect(request.get_full_path())
         else:
             msg = _("No action selected.")
-            self.message_user(request, msg)
+            self.message_user(request, msg, messages.WARNING)
             return None
 
     @csrf_protect_m
@@ -1224,7 +1236,7 @@ class ModelAdmin(BaseModelAdmin):
             else:
                 msg = _("Items must be selected in order to perform "
                         "actions on them. No items have been changed.")
-                self.message_user(request, msg)
+                self.message_user(request, msg, messages.WARNING)
                 action_failed = True
 
         # Actions with confirmation
@@ -1269,7 +1281,7 @@ class ModelAdmin(BaseModelAdmin):
                                     changecount) % {'count': changecount,
                                                     'name': name,
                                                     'obj': force_text(obj)}
-                    self.message_user(request, msg)
+                    self.message_user(request, msg, messages.SUCCESS)
 
                 return HttpResponseRedirect(request.get_full_path())
 
@@ -1346,7 +1358,11 @@ class ModelAdmin(BaseModelAdmin):
             self.log_deletion(request, obj, obj_display)
             self.delete_model(request, obj)
 
-            self.message_user(request, _('The %(name)s "%(obj)s" was deleted successfully.') % {'name': force_text(opts.verbose_name), 'obj': force_text(obj_display)})
+            self.message_user(request, _(
+                'The %(name)s "%(obj)s" was deleted successfully.') % {
+                                       'name': force_text(opts.verbose_name),
+                                       'obj': force_text(obj_display)},
+                              messages.SUCCESS)
 
             if not self.has_change_permission(request, None):
                 return HttpResponseRedirect(reverse('admin:index',
@@ -1519,6 +1535,10 @@ class InlineModelAdmin(BaseModelAdmin):
                 return result
 
         defaults['form'] = DeleteProtectedModelForm
+
+        if defaults['fields'] is None and not modelform_defines_fields(defaults['form']):
+            defaults['fields'] = forms.ALL_FIELDS
+
         return inlineformset_factory(self.parent_model, self.model, **defaults)
 
     def get_fieldsets(self, request, obj=None):

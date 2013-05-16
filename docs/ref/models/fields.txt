@@ -287,6 +287,9 @@ For example, if you have a field ``title`` that has
 ``unique_for_date="pub_date"``, then Django wouldn't allow the entry of two
 records with the same ``title`` and ``pub_date``.
 
+Note that if you set this to point to a :class:`DateTimeField`, only the date
+portion of the field will be considered.
+
 This is enforced by model validation but not at the database level.
 
 ``unique_for_month``
@@ -378,6 +381,7 @@ If you need to accept :attr:`~Field.null` values then use
 :class:`NullBooleanField` instead.
 
 .. versionchanged:: 1.6
+
     The default value of ``BooleanField`` was changed from ``False`` to
     ``None`` when :attr:`Field.default` isn't defined.
 
@@ -476,7 +480,7 @@ A fixed-precision decimal number, represented in Python by a
 .. attribute:: DecimalField.max_digits
 
     The maximum number of digits allowed in the number. Note that this number
-    must be greater than or equal to ``decimal_places``, if it exists.
+    must be greater than or equal to ``decimal_places``.
 
 .. attribute:: DecimalField.decimal_places
 
@@ -956,8 +960,8 @@ Like all :class:`CharField` subclasses, :class:`URLField` takes the optional
 
 .. versionadded:: 1.5
 
-The current value of the field will be displayed as a clickable link above the
-input widget.
+    The current value of the field will be displayed as a clickable link above the
+    input widget.
 
 
 Relationship fields

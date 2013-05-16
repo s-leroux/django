@@ -312,11 +312,7 @@ class QuerySet(object):
                 if skip:
                     obj = model_cls(**dict(zip(init_list, row_data)))
                 else:
-                    try:
-                        obj = model(*row_data)
-                    except IndexError:
-                        import ipdb; ipdb.set_trace()
-                        pass
+                    obj = model(*row_data)
 
                 # Store the source database of the object
                 obj._state.db = db
@@ -466,14 +462,14 @@ class QuerySet(object):
             return self.get(**lookup), False
         except self.model.DoesNotExist:
             try:
-                params = dict([(k, v) for k, v in kwargs.items() if '__' not in k])
+                params = dict((k, v) for k, v in kwargs.items() if LOOKUP_SEP not in k)
                 params.update(defaults)
                 obj = self.model(**params)
                 sid = transaction.savepoint(using=self.db)
                 obj.save(force_insert=True, using=self.db)
                 transaction.savepoint_commit(sid, using=self.db)
                 return obj, True
-            except IntegrityError as e:
+            except IntegrityError:
                 transaction.savepoint_rollback(sid, using=self.db)
                 exc_info = sys.exc_info()
                 try:
@@ -873,7 +869,7 @@ class QuerySet(object):
         """
         if self.query.extra_order_by or self.query.order_by:
             return True
-        elif self.query.default_ordering and self.query.model._meta.ordering:
+        elif self.query.default_ordering and self.query.get_meta().ordering:
             return True
         else:
             return False

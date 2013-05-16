@@ -292,9 +292,18 @@ class FloatField(IntegerField):
 class DecimalField(IntegerField):
     default_error_messages = {
         'invalid': _('Enter a number.'),
-        'max_digits': _('Ensure that there are no more than %s digits in total.'),
-        'max_decimal_places': _('Ensure that there are no more than %s decimal places.'),
-        'max_whole_digits': _('Ensure that there are no more than %s digits before the decimal point.')
+        'max_digits': ungettext_lazy(
+            'Ensure that there are no more than %(max)s digit in total.',
+            'Ensure that there are no more than %(max)s digits in total.',
+            'max'),
+        'max_decimal_places': ungettext_lazy(
+            'Ensure that there are no more than %(max)s decimal place.',
+            'Ensure that there are no more than %(max)s decimal places.',
+            'max'),
+        'max_whole_digits': ungettext_lazy(
+            'Ensure that there are no more than %(max)s digit before the decimal point.',
+            'Ensure that there are no more than %(max)s digits before the decimal point.',
+            'max'),
     }
 
     def __init__(self, max_value=None, min_value=None, max_digits=None, decimal_places=None, *args, **kwargs):
@@ -341,11 +350,15 @@ class DecimalField(IntegerField):
         whole_digits = digits - decimals
 
         if self.max_digits is not None and digits > self.max_digits:
-            raise ValidationError(self.error_messages['max_digits'] % self.max_digits)
+            raise ValidationError(self.error_messages['max_digits'] % {
+                                  'max': self.max_digits})
         if self.decimal_places is not None and decimals > self.decimal_places:
-            raise ValidationError(self.error_messages['max_decimal_places'] % self.decimal_places)
-        if self.max_digits is not None and self.decimal_places is not None and whole_digits > (self.max_digits - self.decimal_places):
-            raise ValidationError(self.error_messages['max_whole_digits'] % (self.max_digits - self.decimal_places))
+            raise ValidationError(self.error_messages['max_decimal_places'] % {
+                                  'max': self.decimal_places})
+        if (self.max_digits is not None and self.decimal_places is not None
+                and whole_digits > (self.max_digits - self.decimal_places)):
+            raise ValidationError(self.error_messages['max_whole_digits'] % {
+                                  'max': (self.max_digits - self.decimal_places)})
         return value
 
     def widget_attrs(self, widget):
@@ -589,13 +602,9 @@ class ImageField(FileField):
         if f is None:
             return None
 
-        # Try to import PIL in either of the two ways it can end up installed.
-        try:
-            from PIL import Image
-        except ImportError:
-            import Image
+        from django.utils.image import Image
 
-        # We need to get a file object for PIL. We might have a path or we might
+        # We need to get a file object for Pillow. We might have a path or we might
         # have to read the data into memory.
         if hasattr(data, 'temporary_file_path'):
             file = data.temporary_file_path()
@@ -610,12 +619,8 @@ class ImageField(FileField):
             # image in memory, which is a DoS vector. See #3848 and #18520.
             # verify() must be called immediately after the constructor.
             Image.open(file).verify()
-        except ImportError:
-            # Under PyPy, it is possible to import PIL. However, the underlying
-            # _imaging C module isn't available, so an ImportError will be
-            # raised. Catch and re-raise.
-            raise
-        except Exception: # Python Imaging Library doesn't recognize it as an image
+        except Exception:
+            # Pillow (or PIL) doesn't recognize it as an image.
             six.reraise(ValidationError, ValidationError(self.error_messages['invalid_image']), sys.exc_info()[2])
         if hasattr(f, 'seek') and callable(f.seek):
             f.seek(0)

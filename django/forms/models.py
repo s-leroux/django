@@ -5,6 +5,8 @@ and database field objects.
 
 from __future__ import absolute_import, unicode_literals
 
+import warnings
+
 from django.core.exceptions import ValidationError, NON_FIELD_ERRORS, FieldError
 from django.forms.fields import Field, ChoiceField
 from django.forms.forms import BaseForm, get_declared_fields
@@ -22,7 +24,11 @@ from django.utils.translation import ugettext_lazy as _, ugettext
 __all__ = (
     'ModelForm', 'BaseModelForm', 'model_to_dict', 'fields_for_model',
     'save_instance', 'ModelChoiceField', 'ModelMultipleChoiceField',
+    'ALL_FIELDS',
 )
+
+ALL_FIELDS = '__all__'
+
 
 def construct_instance(form, instance, fields=None, exclude=None):
     """
@@ -205,8 +211,37 @@ class ModelFormMetaclass(type):
         if 'media' not in attrs:
             new_class.media = media_property(new_class)
         opts = new_class._meta = ModelFormOptions(getattr(new_class, 'Meta', None))
+
+        # We check if a string was passed to `fields` or `exclude`,
+        # which is likely to be a mistake where the user typed ('foo') instead
+        # of ('foo',)
+        for opt in ['fields', 'exclude']:
+            value = getattr(opts, opt)
+            if isinstance(value, six.string_types) and value != ALL_FIELDS:
+                msg = ("%(model)s.Meta.%(opt)s cannot be a string. "
+                       "Did you mean to type: ('%(value)s',)?" % {
+                           'model': new_class.__name__,
+                           'opt': opt,
+                           'value': value,
+                       })
+                raise TypeError(msg)
+
         if opts.model:
             # If a model is defined, extract form fields from it.
+
+            if opts.fields is None and opts.exclude is None:
+                # This should be some kind of assertion error once deprecation
+                # cycle is complete.
+                warnings.warn("Creating a ModelForm without either the 'fields' attribute "
+                              "or the 'exclude' attribute is deprecated - form %s "
+                              "needs updating" % name,
+                              PendingDeprecationWarning)
+
+            if opts.fields == ALL_FIELDS:
+                # sentinel for fields_for_model to indicate "get the list of
+                # fields from the model"
+                opts.fields = None
+
             fields = fields_for_model(opts.model, opts.fields,
                                       opts.exclude, opts.widgets, formfield_callback)
             # make sure opts.fields doesn't specify an invalid field
@@ -379,7 +414,8 @@ def modelform_factory(model, form=ModelForm, fields=None, exclude=None,
     Returns a ModelForm containing form fields for the given model.
 
     ``fields`` is an optional list of field names. If provided, only the named
-    fields will be included in the returned fields.
+    fields will be included in the returned fields. If omitted or '__all__',
+    all fields will be used.
 
     ``exclude`` is an optional list of field names. If provided, the named
     fields will be excluded from the returned fields, even if they are listed
@@ -418,6 +454,15 @@ def modelform_factory(model, form=ModelForm, fields=None, exclude=None,
         'Meta': Meta,
         'formfield_callback': formfield_callback
     }
+
+    # The ModelFormMetaclass will trigger a similar warning/error, but this will
+    # be difficult to debug for code that needs updating, so we produce the
+    # warning here too.
+    if (getattr(Meta, 'fields', None) is None and
+        getattr(Meta, 'exclude', None) is None):
+        warnings.warn("Calling modelform_factory without defining 'fields' or "
+                      "'exclude' explicitly is deprecated",
+                      PendingDeprecationWarning, stacklevel=2)
 
     # Instatiate type(form) in order to use the same metaclass as form.
     return type(form)(class_name, (form,), form_class_attrs)
@@ -686,6 +731,21 @@ def modelformset_factory(model, form=ModelForm, formfield_callback=None,
     """
     Returns a FormSet class for the given Django model class.
     """
+    # modelform_factory will produce the same warning/error, but that will be
+    # difficult to debug for code that needs upgrading, so we produce the
+    # warning here too. This logic is reproducing logic inside
+    # modelform_factory, but it can be removed once the deprecation cycle is
+    # complete, since the validation exception will produce a helpful
+    # stacktrace.
+    meta = getattr(form, 'Meta', None)
+    if meta is None:
+        meta = type(str('Meta'), (object,), {})
+    if (getattr(meta, 'fields', fields) is None and
+        getattr(meta, 'exclude', exclude) is None):
+        warnings.warn("Calling modelformset_factory without defining 'fields' or "
+                      "'exclude' explicitly is deprecated",
+                      PendingDeprecationWarning, stacklevel=2)
+
     form = modelform_factory(model, form=form, fields=fields, exclude=exclude,
                              formfield_callback=formfield_callback,
                              widgets=widgets)
@@ -1024,9 +1084,9 @@ class ModelMultipleChoiceField(ModelChoiceField):
     hidden_widget = MultipleHiddenInput
     default_error_messages = {
         'list': _('Enter a list of values.'),
-        'invalid_choice': _('Select a valid choice. %s is not one of the'
+        'invalid_choice': _('Select a valid choice. %(value)s is not one of the'
                             ' available choices.'),
-        'invalid_pk_value': _('"%s" is not a valid value for a primary key.')
+        'invalid_pk_value': _('"%(pk)s" is not a valid value for a primary key.')
     }
 
     def __init__(self, queryset, cache_choices=False, required=True,
@@ -1048,12 +1108,12 @@ class ModelMultipleChoiceField(ModelChoiceField):
             try:
                 self.queryset.filter(**{key: pk})
             except ValueError:
-                raise ValidationError(self.error_messages['invalid_pk_value'] % pk)
+                raise ValidationError(self.error_messages['invalid_pk_value'] % {'pk': pk})
         qs = self.queryset.filter(**{'%s__in' % key: value})
         pks = set([force_text(getattr(o, key)) for o in qs])
         for val in value:
             if force_text(val) not in pks:
-                raise ValidationError(self.error_messages['invalid_choice'] % val)
+                raise ValidationError(self.error_messages['invalid_choice'] % {'value': val})
         # Since this overrides the inherited ModelChoiceField.clean
         # we run custom validators here
         self.run_validators(value)
@@ -1076,3 +1136,11 @@ class ModelMultipleChoiceField(ModelChoiceField):
         initial_set = set([force_text(value) for value in self.prepare_value(initial)])
         data_set = set([force_text(value) for value in data])
         return data_set != initial_set
+
+
+def modelform_defines_fields(form_class):
+    return (form_class is not None and (
+            hasattr(form_class, '_meta') and
+            (form_class._meta.fields is not None or
+             form_class._meta.exclude is not None)
+            ))
